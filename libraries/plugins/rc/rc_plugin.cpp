@@ -40,7 +40,7 @@ class rc_plugin_impl
          _self( _plugin ) {}
 
       void on_post_apply_block( const block_notification& note );
-      void on_pre_apply_transaction( const transaction_notification& note );
+      //void on_pre_apply_transaction( const transaction_notification& note );
       void on_post_apply_transaction( const transaction_notification& note );
       void on_pre_apply_operation( const operation_notification& note );
       void on_post_apply_operation( const operation_notification& note );
@@ -608,7 +608,7 @@ void rc_plugin::plugin_initialize( const boost::program_options::variables_map& 
       chain::database& db = appbase::app().get_plugin< steem::plugins::chain::chain_plugin >().db();
 
       my->_post_apply_block_conn = db.add_post_apply_block_handler( [&]( const block_notification& note ){ my->on_post_apply_block( note ); }, *this, 0 );
-      my->_pre_apply_transaction_conn = db.add_pre_apply_transaction_handler( [&]( const transaction_notification& note ){ my->on_pre_apply_transaction( note ); }, *this, 0 );
+      //my->_pre_apply_transaction_conn = db.add_pre_apply_transaction_handler( [&]( const transaction_notification& note ){ my->on_pre_apply_transaction( note ); }, *this, 0 );
       my->_post_apply_transaction_conn = db.add_post_apply_transaction_handler( [&]( const transaction_notification& note ){ my->on_post_apply_transaction( note ); }, *this, 0 );
       my->_pre_apply_operation_conn = db.add_pre_apply_operation_handler( [&]( const operation_notification& note ){ my->on_pre_apply_operation( note ); }, *this, 0 );
       my->_post_apply_operation_conn = db.add_post_apply_operation_handler( [&]( const operation_notification& note ){ my->on_post_apply_operation( note ); }, *this, 0 );
