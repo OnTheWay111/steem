@@ -548,7 +548,7 @@ struct post_apply_operation_visitor
 
 void rc_plugin_impl::on_pre_apply_operation( const operation_notification& note )
 {
-   const global_property_object& gpo = _db.get_dynamic_global_properties();
+   const dynamic_global_property_object& gpo = _db.get_dynamic_global_properties();
    const uint32_t now = gpo.time.sec_since_epoch();
    pre_apply_operation_visitor vtor( _shared_state, _db, now, vsp );
 
@@ -568,7 +568,7 @@ void rc_plugin_impl::on_pre_apply_operation( const operation_notification& note 
 
 void rc_plugin_impl::on_post_apply_operation( const operation_notification& note )
 {
-   const global_property_object& gpo = _db.get_dynamic_global_properties();
+   const dynamic_global_property_object& gpo = _db.get_dynamic_global_properties();
    const uint32_t now = gpo.time.sec_since_epoch();
    post_apply_operation_visitor vtor( _shared_state, _db, now );
    note.op.visit( vtor );
