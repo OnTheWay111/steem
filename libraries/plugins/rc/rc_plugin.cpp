@@ -381,6 +381,12 @@ struct pre_apply_operation_visitor
 
    void regenerate( const account_name_type& name )const
    {
+      //
+      // Since RC tracking is non-consensus, we must rely on consensus to forbid
+      // transferring / delegating VESTS that haven't regenerated voting power.
+      //
+      // TODO:  Issue number
+      //
       static_assert( STEEM_RC_REGEN_TIME <= STEEM_VOTE_REGENERATION_SECONDS, "RC regen time must be smaller than vote regen time" );
 
       const account_object& account = _db.get< account_object, by_name >( name );
