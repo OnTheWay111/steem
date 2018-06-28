@@ -350,7 +350,7 @@ void rc_plugin_impl::on_first_block()
    const auto& idx = _db.get_index< account_index >().indices().get< by_id >();
    for( auto it=idx.begin(); it!=idx.end(); ++it )
    {
-      create_rc_account( _db, now, *it, asset(0, VESTS_SYMBOL ) );
+      create_rc_account( _db, now.sec_since_epoch(), *it, asset(0, VESTS_SYMBOL ) );
    }
 
    return;
@@ -491,31 +491,33 @@ struct post_apply_operation_visitor
 
    visitor_shared_state&                    _shared_state;
    database&                                _db;
+   uint32_t                                 _current_time = 0;
 
    post_apply_operation_visitor(
       visitor_shared_state& ss,
-      database& db
-      ) : _shared_state(ss), _db(db)
+      database& db,
+      uint32_t t
+      ) : _shared_state(ss), _db(db), _current_time(t)
    {}
 
    void operator()( const account_create_operation& op )const
    {
-      create_rc_account( op.new_account_name, op.fee );
+      create_rc_account( _db, _current_time, op.new_account_name, op.fee );
    }
 
    void operator()( const account_create_with_delegation_operation& op )const
    {
-      create_rc_account( op.new_account_name, op.fee );
+      create_rc_account( _db, _current_time, op.new_account_name, op.fee );
    }
 
    void operator()( const pow_operation& op )const
    {
-      create_rc_account< true >( op.worker_account, asset( 0, STEEM_SYMBOL ) );
+      create_rc_account< true >( _db, _current_time, op.worker_account, asset( 0, STEEM_SYMBOL ) );
    }
 
    void operator()( const pow2_operation& op )const
    {
-      create_rc_account< true >( op.work.input.worker_account, asset( 0, STEEM_SYMBOL ) );
+      create_rc_account< true >( _db, _current_time, op.work.input.worker_account, asset( 0, STEEM_SYMBOL ) );
    }
 
    // TODO create_claimed_account_operation
@@ -563,7 +565,9 @@ void rc_plugin_impl::on_pre_apply_operation( const operation_notification& note 
 
 void rc_plugin_impl::on_post_apply_operation( const operation_notification& note )
 {
-   post_apply_operation_visitor vtor( _shared_state, _db, now, vsp );
+   const global_property_object& gpo = _db.get_dynamic_global_properties();
+   const uint32_t now = gpo.time.sec_since_epoch();
+   post_apply_operation_visitor vtor( _shared_state, _db, now );
    note.op.visit( vtor );
 
    // This isn't really necessary as _shared_state will be cleared by the next
