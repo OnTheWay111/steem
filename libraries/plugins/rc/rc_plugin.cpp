@@ -550,7 +550,6 @@ void rc_plugin_impl::on_pre_apply_operation( const operation_notification& note 
 {
    const dynamic_global_property_object& gpo = _db.get_dynamic_global_properties();
    const uint32_t now = gpo.time.sec_since_epoch();
-   pre_apply_operation_visitor vtor( _shared_state, _db, now, vsp );
 
    // Update any accounts that were created by this operation based on fee
    fc::optional< price > vsp;
@@ -563,6 +562,8 @@ void rc_plugin_impl::on_pre_apply_operation( const operation_notification& note 
    // post-apply (for example due to an exception), _shared_state might have unclean
    // data.  So it's cleaned here.
    _shared_state.clear();
+
+   pre_apply_operation_visitor vtor( _shared_state, _db, now, vsp );
    note.op.visit( vtor );
 }
 
