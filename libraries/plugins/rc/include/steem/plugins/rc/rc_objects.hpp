@@ -70,6 +70,10 @@ class rc_account_object : public object< rc_account_object_type, rc_account_obje
       steem::chain::util::manabar   rc_manabar;
       asset                 max_rc_creation_adjustment = asset( 0, VESTS_SYMBOL );
       int64_t               max_rc = 0;
+
+      // This is used for bug-catching, to match that the vesting shares in a
+      // pre-op are equal to what they were at the last post-op.
+      asset                 last_vesting_shares = asset( 0, VESTS_SYMBOL );
 };
 
 using namespace boost::multi_index;
@@ -113,5 +117,6 @@ FC_REFLECT( steem::plugins::rc::rc_account_object,
    (rc_manabar)
    (max_rc_creation_adjustment)
    (max_rc)
+   (last_vesting_shares)
    )
 CHAINBASE_SET_INDEX_TYPE( steem::plugins::rc::rc_account_object, steem::plugins::rc::rc_account_index )

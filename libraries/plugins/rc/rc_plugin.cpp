@@ -24,6 +24,14 @@ namespace detail {
 using chain::plugin_exception;
 using steem::chain::util::manabar_params;
 
+struct visitor_shared_state
+{
+   std::vector< account_name_type >   regen_accounts;
+
+   void clear()
+   {  regen_accounts.clear();   }
+};
+
 class rc_plugin_impl
 {
    public:
@@ -31,20 +39,34 @@ class rc_plugin_impl
          _db( appbase::app().get_plugin< steem::plugins::chain::chain_plugin >().db() ),
          _self( _plugin ) {}
 
+      void on_post_apply_block( const block_notification& note );
       void on_pre_apply_transaction( const transaction_notification& note );
       void on_post_apply_transaction( const transaction_notification& note );
       void on_pre_apply_operation( const operation_notification& note );
-      void on_post_apply_block( const block_notification& note );
+      void on_post_apply_operation( const operation_notification& note );
       void on_first_block();
 
       database&                     _db;
       rc_plugin&                    _self;
 
+      // State is shared between the pre- and post- visitor
+      visitor_shared_state          _shared_state;
+
       boost::signals2::connection   _post_apply_block_conn;
       boost::signals2::connection   _pre_apply_transaction_conn;
       boost::signals2::connection   _post_apply_transaction_conn;
+      boost::signals2::connection   _pre_apply_operation_conn;
       boost::signals2::connection   _post_apply_operation_conn;
 };
+
+inline int64_t get_next_vesting_withdrawal( const account_object& account )
+{
+   int64_t total_left = account.to_withdraw.value - account.withdrawn.value;
+   int64_t withdraw_per_period = account.vesting_withdraw_rate.amount.value;
+   int64_t next_withdrawal = (withdraw_per_period <= total_left) ? withdraw_per_period : total_left;
+   bool is_done = (account.next_vesting_withdrawal == fc::time_point_sec::maximum());
+   return is_done ? 0 : next_withdrawal;
+}
 
 int64_t get_maximum_rc( const account_object& account, const rc_account_object& rc_account )
 {
@@ -52,11 +74,20 @@ int64_t get_maximum_rc( const account_object& account, const rc_account_object& 
    result = fc::signed_sat_sub( result, account.delegated_vesting_shares.amount.value );
    result = fc::signed_sat_add( result, account.received_vesting_shares.amount.value );
    result = fc::signed_sat_add( result, rc_account.max_rc_creation_adjustment.amount.value );
+   result = fc::signed_sat_sub( result, get_next_vesting_withdrawal( account ) );
    return result;
 }
 
+template< bool account_may_exist = false >
 void create_rc_account( database& db, uint32_t now, const account_object& account, asset max_rc_creation_adjustment )
 {
+   if( account_may_exist )
+   {
+      const rc_account_object* rc_account = db.find< rc_account_object, by_name >( account.name );
+      if( rc_account != nullptr )
+         return;
+   }
+
    db.create< rc_account_object >( [&]( rc_account_object& rca )
    {
       rca.account = account.name;
@@ -329,29 +360,38 @@ void rc_plugin_impl::on_first_block()
 // This visitor performs the following functions:
 //
 // - Call regenerate() when an account's vesting shares are about to change
-// - Save regenerated accounts in a local array for further (post-operation) processing
+// - Save regenerated account names in a local array for further (post-operation) processing
 //
 struct pre_apply_operation_visitor
 {
    typedef void result_type;
 
+   visitor_shared_state&                    _shared_state;
    database&                                _db;
    uint32_t                                 _current_time = 0;
    fc::optional< price >                    _vesting_share_price;
-   vector< account_name_type >              _regen_accounts;
 
    pre_apply_operation_visitor(
+      visitor_shared_state& ss,
       database& db,
       uint32_t t,
       const fc::optional< price >& vsp
-      )
-      : _db(db), _current_time(t), _vesting_share_price(vsp)
+      ) : _shared_state(ss), _db(db), _current_time(t), _vesting_share_price(vsp)
    {}
 
    void regenerate( const account_name_type& name )const
    {
+      static_assert( STEEM_RC_REGEN_TIME <= STEEM_VOTE_REGENERATION_SECONDS, "RC regen time must be smaller than vote regen time" );
+
       const account_object& account = _db.get< account_object, by_name >( name );
       const rc_account_object& rc_account = _db.get< rc_account_object, by_name >( name );
+
+      if( account.vesting_shares != rc_account.last_vesting_shares )
+      {
+         elog( "Account ${a} VESTS changed from ${old} to ${new} without triggering an op, noticed on block ${b}",
+            ("a", name)("old", account.vesting_shares)("new", rc_account.last_vesting_shares)("b", db.head_block_num()) );
+         // TODO:  Should there be an exception thrown on this condition?
+      }
 
       manabar_params mbparams;
       mbparams.max_mana = get_maximum_rc( account, rc_account );
@@ -362,7 +402,7 @@ struct pre_apply_operation_visitor
          rca.rc_manabar.regenerate_mana( mbparams, _current_time );
       } );
 
-      _regen_accounts.push_back( name );
+      _shared_state.regen_accounts.push_back( name );
    }
 
    void operator()( const transfer_to_vesting_operation& op )const
@@ -441,6 +481,39 @@ struct pre_apply_operation_visitor
 
 struct post_apply_operation_visitor
 {
+   typedef void result_type;
+
+   visitor_shared_state&                    _shared_state;
+   database&                                _db;
+
+   post_apply_operation_visitor(
+      visitor_shared_state& ss,
+      database& db
+      ) : _shared_state(ss), _db(db)
+   {}
+
+   void operator()( const account_create_operation& op )const
+   {
+      create_rc_account( op.new_account_name, op.fee );
+   }
+
+   void operator()( const account_create_with_delegation_operation& op )const
+   {
+      create_rc_account( op.new_account_name, op.fee );
+   }
+
+   void operator()( const pow_operation& op )const
+   {
+      create_rc_account< true >( op.worker_account, asset( 0, STEEM_SYMBOL ) );
+   }
+
+   void operator()( const pow2_operation& op )const
+   {
+      create_rc_account< true >( op.work.input.worker_account, asset( 0, STEEM_SYMBOL ) );
+   }
+
+   // TODO create_claimed_account_operation
+
    void init_rc_account( const account_name_type& account_name, const asset& fee )const
    {
       const account_object& account = _db.get< account_object, by_name >( account_name );
@@ -466,7 +539,7 @@ void rc_plugin_impl::on_pre_apply_operation( const operation_notification& note 
 {
    const global_property_object& gpo = _db.get_dynamic_global_properties();
    const uint32_t now = gpo.time.sec_since_epoch();
-   pre_apply_operation_visitor vtor( _db, now, vsp );
+   pre_apply_operation_visitor vtor( _shared_state, _db, now, vsp );
 
    // Update any accounts that were created by this operation based on fee
    fc::optional< price > vsp;
@@ -475,7 +548,21 @@ void rc_plugin_impl::on_pre_apply_operation( const operation_notification& note 
    if( _db.has_hardfork( STEEM_HARDFORK_0_20 ) )
       vsp = gpo.get_vesting_share_price();
 
+   // If another operation somehow executed its pre-apply without ever getting to
+   // post-apply (for example due to an exception), _shared_state might have unclean
+   // data.  So it's cleaned here.
+   _shared_state.clear();
    note.op.visit( vtor );
+}
+
+void rc_plugin_impl::on_post_apply_operation( const operation_notification& note )
+{
+   post_apply_operation_visitor vtor( _shared_state, _db, now, vsp );
+   note.op.visit( vtor );
+
+   // This isn't really necessary as _shared_state will be cleared by the next
+   // pre-op.
+   _shared_state.clear();
 }
 
 } // detail
@@ -507,6 +594,7 @@ void rc_plugin::plugin_initialize( const boost::program_options::variables_map& 
       my->_pre_apply_transaction_conn = db.add_pre_apply_transaction_handler( [&]( const transaction_notification& note ){ my->on_pre_apply_transaction( note ); }, *this, 0 );
       my->_post_apply_transaction_conn = db.add_post_apply_transaction_handler( [&]( const transaction_notification& note ){ my->on_post_apply_transaction( note ); }, *this, 0 );
       my->_pre_apply_operation_conn = db.add_pre_apply_operation_handler( [&]( const operation_notification& note ){ my->on_pre_apply_operation( note ); }, *this, 0 );
+      my->_post_apply_operation_conn = db.add_post_apply_operation_handler( [&]( const operation_notification& note ){ my->on_post_apply_operation( note ); }, *this, 0 );
 
       add_plugin_index< rc_resource_param_index >(db);
       add_plugin_index< rc_pool_index >(db);
