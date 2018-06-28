@@ -81,6 +81,7 @@ int64_t get_maximum_rc( const account_object& account, const rc_account_object& 
 template< bool account_may_exist = false >
 void create_rc_account( database& db, uint32_t now, const account_object& account, asset max_rc_creation_adjustment )
 {
+   ilog( "create_rc_account( ${a} )", ("a", account.name) );
    if( account_may_exist )
    {
       const rc_account_object* rc_account = db.find< rc_account_object, by_name >( account.name );
@@ -165,7 +166,7 @@ void use_account_rcs(
       return;
    }
 
-   // ilog( "use_account_rcs( ${n}, ${rc} )", ("n", account_name)("rc", rc) );
+   ilog( "use_account_rcs( ${n}, ${rc} )", ("n", account_name)("rc", rc) );
    const account_object& account = db.get< account_object, by_name >( account_name );
    const rc_account_object& rc_account = db.get< rc_account_object, by_name >( account_name );
 
@@ -412,6 +413,7 @@ struct pre_apply_operation_visitor
       //
       static_assert( STEEM_RC_REGEN_TIME <= STEEM_VOTE_REGENERATION_SECONDS, "RC regen time must be smaller than vote regen time" );
 
+      ilog( "regenerate(${a})", ("a", name) );
       const account_object& account = _db.get< account_object, by_name >( name );
       const rc_account_object& rc_account = _db.get< rc_account_object, by_name >( name );
 
@@ -535,6 +537,7 @@ struct post_apply_operation_visitor
 
    void operator()( const pow_operation& op )const
    {
+      ilog( "handling post-apply pow_operation" );
       create_rc_account< true >( _db, _current_time, op.worker_account, asset( 0, STEEM_SYMBOL ) );
    }
 
@@ -546,7 +549,10 @@ struct post_apply_operation_visitor
    // TODO create_claimed_account_operation
 
    template< typename Op >
-   void operator()( const Op& op ) {}
+   void operator()( const Op& op )
+   {
+      ilog( "handling post-apply operation default" );
+   }
 };
 
 void rc_plugin_impl::on_pre_apply_operation( const operation_notification& note )
@@ -566,6 +572,7 @@ void rc_plugin_impl::on_pre_apply_operation( const operation_notification& note 
    // data.  So it's cleaned here.
    _shared_state.clear();
 
+   ilog( "Calling pre-vtor on ${op}", ("op", note.op) );
    pre_apply_operation_visitor vtor( _shared_state, _db, now, vsp );
    note.op.visit( vtor );
 }
@@ -574,6 +581,8 @@ void rc_plugin_impl::on_post_apply_operation( const operation_notification& note
 {
    const dynamic_global_property_object& gpo = _db.get_dynamic_global_properties();
    const uint32_t now = gpo.time.sec_since_epoch();
+
+   ilog( "Calling post-vtor on ${op}", ("op", note.op) );
    post_apply_operation_visitor vtor( _shared_state, _db, now );
    note.op.visit( vtor );
 
