@@ -507,7 +507,7 @@ struct pre_apply_operation_visitor
    }
 
    template< typename Op >
-   void operator()( const Op& op ) {}
+   void operator()( const Op& op )const {}
 };
 
 struct post_apply_operation_visitor
@@ -549,7 +549,7 @@ struct post_apply_operation_visitor
    // TODO create_claimed_account_operation
 
    template< typename Op >
-   void operator()( const Op& op )
+   void operator()( const Op& op )const
    {
       ilog( "handling post-apply operation default" );
    }
