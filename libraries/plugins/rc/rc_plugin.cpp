@@ -540,7 +540,7 @@ struct post_apply_operation_visitor
 
    void operator()( const pow2_operation& op )const
    {
-      create_rc_account< true >( _db, _current_time, get_worker_name( op ), asset( 0, STEEM_SYMBOL ) );
+      create_rc_account< true >( _db, _current_time, get_worker_name( op.work ), asset( 0, STEEM_SYMBOL ) );
    }
 
    // TODO create_claimed_account_operation
