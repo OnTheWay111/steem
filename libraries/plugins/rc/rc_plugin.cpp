@@ -13,7 +13,7 @@
 
 #include <steem/jsonball/jsonball.hpp>
 
-#define STEEM_RC_REGEN_TIME   (60*60*24*15)
+#define STEEM_RC_REGEN_TIME   (60*60*24*5)
 
 namespace steem { namespace plugins { namespace rc {
 
@@ -347,10 +347,10 @@ void rc_plugin_impl::on_first_block()
          ilog( "Genesis pool_obj is ${o}", ("o", pool_obj) );
       } );
 
-   const auto& idx = db.get_index< account_index >().indices().get< by_id >();
+   const auto& idx = _db.get_index< account_index >().indices().get< by_id >();
    for( auto it=idx.begin(); it!=idx.end(); ++it )
    {
-      create_rc_account( db, now, *it, asset(0, VESTS_SYMBOL ) );
+      create_rc_account( _db, now, *it, asset(0, VESTS_SYMBOL ) );
    }
 
    return;
@@ -452,7 +452,7 @@ struct pre_apply_operation_visitor
    {
       if( op.hardfork_id == STEEM_HARDFORK_0_1 )
       {
-         const auto& idx = db.get_index< account_index >().indices().get< by_id >();
+         const auto& idx = _db.get_index< account_index >().indices().get< by_id >();
          for( auto it=idx.begin(); it!=idx.end(); ++it )
          {
             regenerate( it->name );
