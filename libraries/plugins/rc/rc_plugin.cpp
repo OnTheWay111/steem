@@ -362,6 +362,23 @@ void rc_plugin_impl::on_first_block()
    return;
 }
 
+struct get_worker_name_visitor
+{
+   typedef account_name_type result_type;
+
+   template< typename WorkType >
+   account_name_type operator()( const WorkType& work )
+   {   return work.input.worker_account;    }
+};
+
+account_name_type get_worker_name( const pow2_work& work )
+{
+   // Even though in both cases the result is work.input.worker_account,
+   // we have to use a visitor because pow2_work is a static_variant
+   get_worker_name_visitor vtor;
+   return work.visit( vtor );
+}
+
 //
 // This visitor performs the following functions:
 //
@@ -523,7 +540,7 @@ struct post_apply_operation_visitor
 
    void operator()( const pow2_operation& op )const
    {
-      create_rc_account< true >( _db, _current_time, op.work.input.worker_account, asset( 0, STEEM_SYMBOL ) );
+      create_rc_account< true >( _db, _current_time, get_worker_name( op ), asset( 0, STEEM_SYMBOL ) );
    }
 
    // TODO create_claimed_account_operation
