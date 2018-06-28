@@ -98,6 +98,12 @@ void create_rc_account( database& db, uint32_t now, const account_object& accoun
    } );
 }
 
+template< bool account_may_exist = false >
+void create_rc_account( database& db, uint32_t now, const account_name_type& account_name, asset max_rc_creation_adjustment )
+{
+   create_rc_account< account_may_exist >( db, now, account_name, max_rc_creation_adjustment );
+}
+
 std::vector< std::pair< int64_t, account_name_type > > dump_all_accounts( const database& db )
 {
    std::vector< std::pair< int64_t, account_name_type > > result;
