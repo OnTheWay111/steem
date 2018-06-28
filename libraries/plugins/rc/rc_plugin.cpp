@@ -544,26 +544,6 @@ struct post_apply_operation_visitor
    }
 
    // TODO create_claimed_account_operation
-
-   void init_rc_account( const account_name_type& account_name, const asset& fee )const
-   {
-      const account_object& account = _db.get< account_object, by_name >( account_name );
-      const rc_account_object& rc_account = _db.get< rc_account_object, by_name >( account_name );
-
-      // NB this "times" is actually division
-      asset fee_vests = asset( 0, VESTS_SYMBOL );
-      if( _vesting_share_price.valid() )
-         fee_vests = fee * (*_vesting_share_price);
-
-      _db.modify( rc_account,
-         [&]( rc_account_object& rca )
-         {
-            rca.max_rc_creation_adjustment = fee_vests;
-            // get_maximum_rc() should see the value changed by the above line
-            rca.rc_manabar.current_mana = get_maximum_rc( account, rca );
-            rca.rc_manabar.last_update_time = _current_time;
-         } );
-   }
 };
 
 void rc_plugin_impl::on_pre_apply_operation( const operation_notification& note )
