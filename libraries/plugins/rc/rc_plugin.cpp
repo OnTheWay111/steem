@@ -544,6 +544,9 @@ struct post_apply_operation_visitor
    }
 
    // TODO create_claimed_account_operation
+
+   template< typename Op >
+   void operator()( const Op& op ) {}
 };
 
 void rc_plugin_impl::on_pre_apply_operation( const operation_notification& note )
