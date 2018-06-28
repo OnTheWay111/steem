@@ -31,14 +31,19 @@ class rc_plugin_impl
          _db( appbase::app().get_plugin< steem::plugins::chain::chain_plugin >().db() ),
          _self( _plugin ) {}
 
+      void on_pre_apply_transaction( const transaction_notification& note );
       void on_post_apply_transaction( const transaction_notification& note );
+      void on_pre_apply_operation( const operation_notification& note );
       void on_post_apply_block( const block_notification& note );
       void on_first_block();
 
       database&                     _db;
       rc_plugin&                    _self;
+
       boost::signals2::connection   _post_apply_block_conn;
+      boost::signals2::connection   _pre_apply_transaction_conn;
       boost::signals2::connection   _post_apply_transaction_conn;
+      boost::signals2::connection   _post_apply_operation_conn;
 };
 
 int64_t get_maximum_rc( const account_object& account, const rc_account_object& rc_account )
@@ -50,14 +55,15 @@ int64_t get_maximum_rc( const account_object& account, const rc_account_object& 
    return result;
 }
 
-void create_rc_account( database& db, uint32_t now, const account_object& account )
+void create_rc_account( database& db, uint32_t now, const account_object& account, asset max_rc_creation_adjustment )
 {
    db.create< rc_account_object >( [&]( rc_account_object& rca )
    {
       rca.account = account.name;
       rca.rc_manabar.current_mana = get_maximum_rc( account, rca );
       rca.rc_manabar.last_update_time = now;
-      rca.max_rc_creation_adjustment = asset( 0, VESTS_SYMBOL );
+      rca.max_rc_creation_adjustment = max_rc_creation_adjustment;
+      rca.max_rc = rca.rc_manabar.current_mana;
    } );
 }
 
@@ -83,125 +89,6 @@ std::vector< std::pair< int64_t, account_name_type > > dump_all_rc_accounts( con
    }
 
    return result;
-}
-
-void create_rc_accounts( database& db, uint32_t now )
-{
-   //
-   // This method creates a corresponding rc_account_object for every account_object
-   // that doesn't already have one.
-   //
-   // The handling of rc_accounts will need to be completely redesigned from scratch
-   // if we ever add functionality that can remove account_object.
-   //
-
-   const auto& idx = db.get_index< account_index >().indices().get< by_id >();
-   const auto& rc_idx = db.get_index< rc_account_index >().indices().get< by_id >();
-   bool debug_print = (db.head_block_num() > 160785) && (db.head_block_num() < 160795);
-
-   if( debug_print )
-   {
-      ilog( "Begin create_rc_accounts()" );
-      ilog( "   accounts:   ${a}", ("a", dump_all_accounts(db)   ) );
-      ilog( "rc_accounts:   ${a}", ("a", dump_all_rc_accounts(db)) );
-   }
-
-   std::vector< std::pair< int64_t, account_name_type > > account_names;
-   std::vector< std::pair< int64_t, account_name_type > > rc_account_names;
-
-   // Special case when rc is empty
-   auto rc_it = rc_idx.end();
-   if( rc_it == rc_idx.begin() )
-   {
-      for( auto it=idx.begin(); it!=idx.end(); ++it )
-      {
-         create_rc_account( db, now, *it );
-      }
-      if( debug_print )
-      {
-         ilog( "   accounts:   ${a}", ("a", dump_all_accounts(db)   ) );
-         ilog( "rc_accounts:   ${a}", ("a", dump_all_rc_accounts(db)) );
-         ilog( "create_rc_accounts() end (genesis path)" );
-      }
-      return;
-   }
-
-   // Get the ID of the last rc_account
-   --rc_it;
-   rc_account_object::id_type last_rc_id = rc_it->id;
-
-   // Find the first account with an id greater than the last RC account
-   // Note, we cannot walk backwards because this would cause the rc_accounts to
-   // be created in the wrong order
-   auto it = idx.upper_bound( last_rc_id._id );
-   while( it != idx.end() )
-   {
-      create_rc_account( db, now, *it );
-      ++it;
-   }
-   if( debug_print )
-   {
-      ilog( "   accounts:   ${a}", ("a", dump_all_accounts(db)   ) );
-      ilog( "rc_accounts:   ${a}", ("a", dump_all_rc_accounts(db)) );
-      ilog( "create_rc_accounts() end (normal path)" );
-   }
-}
-
-struct init_rc_account_visitor
-{
-   typedef void result_type;
-
-   database&                                _db;
-   uint32_t                                 _current_time = 0;
-   fc::optional< price >                    _vesting_share_price;
-
-   init_rc_account_visitor(
-      database& db,
-      uint32_t t,
-      const fc::optional< price >& vsp
-      )
-      : _db(db), _current_time(t), _vesting_share_price(vsp)
-   {}
-
-   void init_rc_account( const account_name_type& account_name, const asset& fee )const
-   {
-      const account_object& account = _db.get< account_object, by_name >( account_name );
-      const rc_account_object& rc_account = _db.get< rc_account_object, by_name >( account_name );
-
-      // NB this "times" is actually division
-      asset fee_vests = asset( 0, VESTS_SYMBOL );
-      if( _vesting_share_price.valid() )
-         fee_vests = fee * (*_vesting_share_price);
-
-      _db.modify( rc_account,
-         [&]( rc_account_object& rca )
-         {
-            rca.max_rc_creation_adjustment = fee_vests;
-            // get_maximum_rc() should see the value changed by the above line
-            rca.rc_manabar.current_mana = get_maximum_rc( account, rca );
-            rca.rc_manabar.last_update_time = _current_time;
-         } );
-   }
-
-   void operator()( const account_create_operation& op )const
-   {
-      init_rc_account( op.new_account_name, op.fee );
-   }
-
-   void operator()( const account_create_with_delegation_operation& op )const
-   {
-      init_rc_account( op.new_account_name, op.fee );
-   }
-
-   template< typename OpType >
-   void operator()( const OpType op )const {}
-};
-
-void init_rc_accounts( database& db, uint32_t now, const fc::optional< price >& vsp, const signed_transaction& tx )
-{
-   init_rc_account_visitor vtor( db, now, vsp );
-   for( const operation& op : tx.operations )
-      op.visit( vtor );
 }
 
 account_name_type get_resource_user( const signed_transaction& tx )
@@ -276,8 +163,6 @@ void rc_plugin_impl::on_post_apply_transaction( const transaction_notification& 
    }
    int64_t rc_regen = gpo.total_vesting_shares.amount.value / STEEM_RC_REGEN_TIME;
 
-   create_rc_accounts( _db, gpo.time.sec_since_epoch() );
-
    rc_transaction_info tx_info;
 
    // How many resources does the transaction use?
@@ -288,9 +173,6 @@ void rc_plugin_impl::on_post_apply_transaction( const transaction_notification& 
    const rc_pool_object& pool_obj = _db.get< rc_pool_object, by_id >( rc_pool_object::id_type() );
 
    int64_t total_cost = 0;
-
-   // Update any accounts that were created by this transaction based on fee
-   fc::optional< price > vsp;
 
    // When rc_regen is 0, everything is free
    if( rc_regen > 0 )
@@ -304,13 +186,7 @@ void rc_plugin_impl::on_post_apply_transaction( const transaction_notification& 
          tx_info.cost[i] = compute_rc_cost_of_resource( params.curve_params, pool, tx_info.usage.resource_count[i], rc_regen );
          total_cost += tx_info.cost[i];
       }
-
-      // TODO: Add issue number to HF constant
-      if( _db.has_hardfork( STEEM_HARDFORK_0_20 ) )
-         vsp = gpo.get_vesting_share_price();
    }
-
-   init_rc_accounts( _db, gpo.time.sec_since_epoch(), vsp, note.transaction );
 
    tx_info.resource_user = get_resource_user( note.transaction );
    use_account_rcs( _db, gpo, tx_info.resource_user, total_cost );
@@ -440,9 +316,166 @@ void rc_plugin_impl::on_first_block()
          ilog( "Genesis pool_obj is ${o}", ("o", pool_obj) );
       } );
 
-   create_rc_accounts( _db, now.sec_since_epoch() );
+   const auto& idx = db.get_index< account_index >().indices().get< by_id >();
+   for( auto it=idx.begin(); it!=idx.end(); ++it )
+   {
+      create_rc_account( db, now, *it, asset(0, VESTS_SYMBOL ) );
+   }
 
    return;
+}
+
+//
+// This visitor performs the following functions:
+//
+// - Call regenerate() when an account's vesting shares are about to change
+// - Save regenerated accounts in a local array for further (post-operation) processing
+//
+struct pre_apply_operation_visitor
+{
+   typedef void result_type;
+
+   database&                                _db;
+   uint32_t                                 _current_time = 0;
+   fc::optional< price >                    _vesting_share_price;
+   vector< account_name_type >              _regen_accounts;
+
+   pre_apply_operation_visitor(
+      database& db,
+      uint32_t t,
+      const fc::optional< price >& vsp
+      )
+      : _db(db), _current_time(t), _vesting_share_price(vsp)
+   {}
+
+   void regenerate( const account_name_type& name )const
+   {
+      const account_object& account = _db.get< account_object, by_name >( name );
+      const rc_account_object& rc_account = _db.get< rc_account_object, by_name >( name );
+
+      manabar_params mbparams;
+      mbparams.max_mana = get_maximum_rc( account, rc_account );
+      mbparams.regen_time = STEEM_RC_REGEN_TIME;
+
+      _db.modify( rc_account, [&]( rc_account_object& rca )
+      {
+         rca.rc_manabar.regenerate_mana( mbparams, _current_time );
+      } );
+
+      _regen_accounts.push_back( name );
+   }
+
+   void operator()( const transfer_to_vesting_operation& op )const
+   {
+      account_name_type target = op.to.size() ? op.to : op.from;
+      regenerate( target );
+   }
+
+   void operator()( const withdraw_vesting_operation& op )const
+   {
+      regenerate( op.account );
+   }
+
+   void operator()( const set_withdraw_vesting_route_operation& op )const
+   {
+      regenerate( op.from_account );
+   }
+
+   void operator()( const delegate_vesting_shares_operation& op )const
+   {
+      regenerate( op.delegator );
+      regenerate( op.delegatee );
+   }
+
+   void operator()( const author_reward_operation& op )const
+   {
+      regenerate( op.author );
+   }
+
+   void operator()( const curation_reward_operation& op )const
+   {
+      regenerate( op.curator );
+   }
+
+   // Is this one actually necessary?
+   void operator()( const comment_reward_operation& op )const
+   {
+      regenerate( op.author );
+   }
+
+   void operator()( const fill_vesting_withdraw_operation& op )const
+   {
+      regenerate( op.from_account );
+   }
+
+   void operator()( const hardfork_operation& op )const
+   {
+      if( op.hardfork_id == STEEM_HARDFORK_0_1 )
+      {
+         const auto& idx = db.get_index< account_index >().indices().get< by_id >();
+         for( auto it=idx.begin(); it!=idx.end(); ++it )
+         {
+            regenerate( it->name );
+         }
+      }
+   }
+
+   void operator()( const return_vesting_delegation_operation& op )const
+   {
+      regenerate( op.account );
+   }
+
+   void operator()( const comment_benefactor_reward_operation& op )const
+   {
+      regenerate( op.benefactor );
+   }
+
+   void operator()( const producer_reward_operation& op )const
+   {
+      regenerate( op.producer );
+   }
+
+   template< typename Op >
+   void operator()( const Op& op ) {}
+};
+
+struct post_apply_operation_visitor
+{
+   void init_rc_account( const account_name_type& account_name, const asset& fee )const
+   {
+      const account_object& account = _db.get< account_object, by_name >( account_name );
+      const rc_account_object& rc_account = _db.get< rc_account_object, by_name >( account_name );
+
+      // NB this "times" is actually division
+      asset fee_vests = asset( 0, VESTS_SYMBOL );
+      if( _vesting_share_price.valid() )
+         fee_vests = fee * (*_vesting_share_price);
+
+      _db.modify( rc_account,
+         [&]( rc_account_object& rca )
+         {
+            rca.max_rc_creation_adjustment = fee_vests;
+            // get_maximum_rc() should see the value changed by the above line
+            rca.rc_manabar.current_mana = get_maximum_rc( account, rca );
+            rca.rc_manabar.last_update_time = _current_time;
+         } );
+   }
+};
+
+void rc_plugin_impl::on_pre_apply_operation( const operation_notification& note )
+{
+   const global_property_object& gpo = _db.get_dynamic_global_properties();
+   const uint32_t now = gpo.time.sec_since_epoch();
+   pre_apply_operation_visitor vtor( _db, now, vsp );
+
+   // Update any accounts that were created by this operation based on fee
+   fc::optional< price > vsp;
+
+   // TODO: Add issue number to HF constant
+   if( _db.has_hardfork( STEEM_HARDFORK_0_20 ) )
+      vsp = gpo.get_vesting_share_price();
+
+   note.op.visit( vtor );
 }
 
 } // detail
@@ -471,7 +504,9 @@ void rc_plugin::plugin_initialize( const boost::program_options::variables_map& 
       chain::database& db = appbase::app().get_plugin< steem::plugins::chain::chain_plugin >().db();
 
       my->_post_apply_block_conn = db.add_post_apply_block_handler( [&]( const block_notification& note ){ my->on_post_apply_block( note ); }, *this, 0 );
+      my->_pre_apply_transaction_conn = db.add_pre_apply_transaction_handler( [&]( const transaction_notification& note ){ my->on_pre_apply_transaction( note ); }, *this, 0 );
       my->_post_apply_transaction_conn = db.add_post_apply_transaction_handler( [&]( const transaction_notification& note ){ my->on_post_apply_transaction( note ); }, *this, 0 );
+      my->_pre_apply_operation_conn = db.add_pre_apply_operation_handler( [&]( const operation_notification& note ){ my->on_pre_apply_operation( note ); }, *this, 0 );
 
       add_plugin_index< rc_resource_param_index >(db);
       add_plugin_index< rc_pool_index >(db);

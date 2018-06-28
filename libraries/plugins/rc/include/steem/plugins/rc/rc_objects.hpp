@@ -69,6 +69,7 @@ class rc_account_object : public object< rc_account_object_type, rc_account_obje
       account_name_type     account;
       steem::chain::util::manabar   rc_manabar;
       asset                 max_rc_creation_adjustment = asset( 0, VESTS_SYMBOL );
+      int64_t               max_rc = 0;
 };
 
 using namespace boost::multi_index;
@@ -111,5 +112,6 @@ FC_REFLECT( steem::plugins::rc::rc_account_object,
    (account)
    (rc_manabar)
    (max_rc_creation_adjustment)
+   (max_rc)
    )
 CHAINBASE_SET_INDEX_TYPE( steem::plugins::rc::rc_account_object, steem::plugins::rc::rc_account_index )
