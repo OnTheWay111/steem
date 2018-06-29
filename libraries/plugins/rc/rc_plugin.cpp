@@ -419,7 +419,7 @@ struct pre_apply_operation_visitor
       if( account.vesting_shares != rc_account.last_vesting_shares )
       {
          elog( "Account ${a} VESTS changed from ${old} to ${new} without triggering an op, noticed on block ${b}",
-            ("a", account.name)("old", account.vesting_shares)("new", rc_account.last_vesting_shares)("b", _db.head_block_num()) );
+            ("a", account.name)("old", rc_account.last_vesting_shares)("new", account.vesting_shares)("b", _db.head_block_num()) );
          // TODO:  Should there be an exception thrown on this condition?
       }
 
