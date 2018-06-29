@@ -395,14 +395,13 @@ struct pre_apply_operation_visitor
    visitor_shared_state&                    _shared_state;
    database&                                _db;
    uint32_t                                 _current_time = 0;
+   uint32_t                                 _current_block_number = 0;
    fc::optional< price >                    _vesting_share_price;
 
    pre_apply_operation_visitor(
       visitor_shared_state& ss,
-      database& db,
-      uint32_t t,
-      const fc::optional< price >& vsp
-      ) : _shared_state(ss), _db(db), _current_time(t), _vesting_share_price(vsp)
+      database& db
+      ) : _shared_state(ss), _db(db)
    {}
 
    void regenerate( const account_object& account, const rc_account_object& rc_account )const
@@ -580,22 +579,21 @@ struct post_apply_operation_visitor
 void rc_plugin_impl::on_pre_apply_operation( const operation_notification& note )
 {
    const dynamic_global_property_object& gpo = _db.get_dynamic_global_properties();
-   const uint32_t now = gpo.time.sec_since_epoch();
-
-   // Update any accounts that were created by this operation based on fee
-   fc::optional< price > vsp;
-
-   // TODO: Add issue number to HF constant
-   if( _db.has_hardfork( STEEM_HARDFORK_0_20 ) )
-      vsp = gpo.get_vesting_share_price();
+   pre_apply_operation_visitor vtor( _shared_state, _db );
 
    // If another operation somehow executed its pre-apply without ever getting to
    // post-apply (for example due to an exception), _shared_state might have unclean
    // data.  So it's cleaned here.
-   _shared_state.clear();
+   vtor._shared_state.clear();
+
+   // TODO: Add issue number to HF constant
+   if( _db.has_hardfork( STEEM_HARDFORK_0_20 ) )
+      vtor._vesting_share_price = gpo.get_vesting_share_price();
+
+   vtor._current_time = gpo.time.sec_since_epoch();
+   vtor._current_block_number = gpo.head_block_number;
 
    ilog( "Calling pre-vtor on ${op}", ("op", note.op) );
-   pre_apply_operation_visitor vtor( _shared_state, _db, now, vsp );
    note.op.visit( vtor );
 }
 
