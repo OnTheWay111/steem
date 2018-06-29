@@ -601,6 +601,19 @@ void rc_plugin_impl::on_pre_apply_operation( const operation_notification& note 
    note.op.visit( vtor );
 }
 
+void update_last_vesting( database& db, const std::vector< account_name_type >& regen_accounts )
+{
+   for( const account_name_type& name : regen_accounts )
+   {
+      const account_object& account = db.get< account_object, by_name >( name );
+      const rc_account_object& rc_account = db.get< rc_account_object, by_name >( name );
+      db.modify( rc_account, [&]( rc_account_object& rca )
+      {
+         rca.last_vesting_shares = account.vesting_shares;
+      } );
+   }
+}
+
 void rc_plugin_impl::on_post_apply_operation( const operation_notification& note )
 {
    const dynamic_global_property_object& gpo = _db.get_dynamic_global_properties();
@@ -609,6 +622,8 @@ void rc_plugin_impl::on_post_apply_operation( const operation_notification& note
    ilog( "Calling post-vtor on ${op}", ("op", note.op) );
    post_apply_operation_visitor vtor( _shared_state, _db, now );
    note.op.visit( vtor );
+
+   update_last_vesting( _db, _shared_state.regen_accounts );
 
    // This isn't really necessary as _shared_state will be cleared by the next
    // pre-op.
