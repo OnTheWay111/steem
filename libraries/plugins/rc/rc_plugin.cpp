@@ -404,7 +404,7 @@ struct pre_apply_operation_visitor
       ) : _shared_state(ss), _db(db), _current_time(t), _vesting_share_price(vsp)
    {}
 
-   void regenerate( const account_name_type& name )const
+   void regenerate( const account_object& account, const rc_account_object& rc_account )const
    {
       //
       // Since RC tracking is non-consensus, we must rely on consensus to forbid
@@ -414,14 +414,12 @@ struct pre_apply_operation_visitor
       //
       static_assert( STEEM_RC_REGEN_TIME <= STEEM_VOTE_REGENERATION_SECONDS, "RC regen time must be smaller than vote regen time" );
 
-      ilog( "regenerate(${a})", ("a", name) );
-      const account_object& account = _db.get< account_object, by_name >( name );
-      const rc_account_object& rc_account = _db.get< rc_account_object, by_name >( name );
+      ilog( "regenerate(${a})", ("a", account.name) );
 
       if( account.vesting_shares != rc_account.last_vesting_shares )
       {
          elog( "Account ${a} VESTS changed from ${old} to ${new} without triggering an op, noticed on block ${b}",
-            ("a", name)("old", account.vesting_shares)("new", rc_account.last_vesting_shares)("b", _db.head_block_num()) );
+            ("a", account.name)("old", account.vesting_shares)("new", rc_account.last_vesting_shares)("b", _db.head_block_num()) );
          // TODO:  Should there be an exception thrown on this condition?
       }
 
@@ -434,7 +432,27 @@ struct pre_apply_operation_visitor
          rca.rc_manabar.regenerate_mana( mbparams, _current_time );
       } );
 
-      _shared_state.regen_accounts.push_back( name );
+      _shared_state.regen_accounts.push_back( account.name );
+   }
+
+   template< bool account_may_not_exist = false >
+   void regenerate( const account_name_type& name )const
+   {
+      const account_object* account = _db.find< account_object, by_name >( name );
+      if( account_may_not_exist )
+      {
+         if( account == nullptr )
+            return;
+      }
+      else
+      {
+         FC_ASSERT( account != nullptr, "Unexpectedly, account ${a} does not exist", ("a", name) );
+      }
+
+      const rc_account_object* rc_account = _db.find< rc_account_object, by_name >( name );
+      FC_ASSERT( rc_account != nullptr, "Unexpectedly, rc_account ${a} does not exist", ("a", name) );
+
+      regenerate( *account, *rc_account );
    }
 
    void operator()( const transfer_to_vesting_operation& op )const
