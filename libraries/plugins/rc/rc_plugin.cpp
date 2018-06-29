@@ -97,6 +97,7 @@ void create_rc_account( database& db, uint32_t now, const account_object& accoun
       rca.rc_manabar.last_update_time = now;
       rca.max_rc_creation_adjustment = max_rc_creation_adjustment;
       rca.max_rc = rca.rc_manabar.current_mana;
+      rca.last_vesting_shares = account.vesting_shares;
    } );
 }
 
