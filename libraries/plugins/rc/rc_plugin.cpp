@@ -522,7 +522,11 @@ struct pre_apply_operation_visitor
 
    void operator()( const producer_reward_operation& op )const
    {
-      regenerate( op.producer );
+      // Producer reward for block 1 doesn't trigger regen because
+      //   it doesn't exist.  We could possibly handle this better
+      //   by implementing the first block check in a pre-handler.
+      if( _current_block_number > 1 )
+         regenerate( op.producer );
    }
 
    template< typename Op >
